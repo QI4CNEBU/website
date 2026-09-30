@@ -2,9 +2,11 @@
   --bg-0: #06060b;
   --bg-1: #0b0a14;
   --text: #ece9f6;
-  --text-muted: #9c96b8;
+  --text-muted: #e0ddef;
   --primary: #a855f7;
   --primary-soft: rgba(168, 85, 247, 0.14);
+  --primary-glow: rgba(168, 85, 247, 0.85);
+  --accent: #22d3ee;
   --border: rgba(168, 85, 247, 0.22);
   --border-soft: rgba(255, 255, 255, 0.08);
 
@@ -28,21 +30,44 @@
 
 html {
   scroll-behavior: smooth;
-  height: 100%;
+  /* 修复：锚点跳转时标题被 68px 的 sticky 导航遮挡 */
+  scroll-padding-top: 84px;
 }
 
-html.snap-mode {
-  overflow: hidden;
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 
 body {
   margin: 0;
-  height: 100%;
-  background: var(--bg-0);
+  /* 多层径向渐变：紫 + 深蓝，营造魔法光晕（fixed 让光晕在滚动时保持稳定）。
+     最上层再叠一层极淡的噪点（SVG feTurbulence 的 data-URI，纯 CSS，无图片文件）：
+     背景有了高频纹理，卡片上的 backdrop-filter 才有东西可模糊——
+     卡片外是颗粒、卡片内颗粒被抹平，磨砂质感才真正看得出来。
+     放在 body 上而不是粒子容器里，是为了让它保持静止（不跟随粒子的漂移/呼吸动画）。
+     想调颗粒强弱改 slope 即可（0.055 ≈ 5.5% 白噪）。 */
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='linear' slope='0.055'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+    radial-gradient(120% 90% at 50% -12%, rgba(140, 80, 255, 0.28), transparent 58%),
+    radial-gradient(85% 70% at 88% 8%, rgba(38, 82, 205, 0.22), transparent 62%),
+    radial-gradient(90% 80% at 6% 92%, rgba(168, 85, 247, 0.14), transparent 60%),
+    var(--bg-0);
+  background-size: 180px 180px, auto, auto, auto;
+  background-attachment: fixed;
   color: var(--text);
   font-family: var(--font-sans);
   font-size: 16px;
-  line-height: 1.6;
+  line-height: 1.8;
 }
 
 h1,
@@ -51,6 +76,134 @@ h3,
 p,
 figure {
   margin: 0;
+}
+
+/* ============================================================
+   魔法粒子（全页最底层装饰，纯 CSS，无 JS）
+   原理：用 radial-gradient 平铺出光点——每层渐变的 background-size
+        就是一个「瓦片」，一个瓦片里放一个光点。多层不同尺寸的瓦片
+        叠加后周期极大，看不出重复，分布也天然均匀。
+        3 层 × 每层 4 个渐变 = 12 层光点，只有 1 个 DOM 节点。
+   ============================================================ */
+.magic-particles {
+  position: fixed;
+  /* 比视口略大，给漂浮动效留出余量，避免位移时露出边缘 */
+  inset: -12%;
+  /* 关键：负 z-index + 无交互。body 的背景会被提升为画布背景（在更底层），
+     而 .home 是 position:relative/z-index:auto，会压在本层之上，
+     所以粒子只出现在区块背景里，永远不会盖住文字或按钮。 */
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+
+  /* 主层：紫 + 蓝，颗粒 1.6–2.4px（半径 0.8–1.2px） */
+  background-image:
+    radial-gradient(
+      1.2px 1.2px at 18px 27px,
+      rgba(168, 85, 247, 0.26),
+      rgba(168, 85, 247, 0) 100%
+    ),
+    radial-gradient(0.8px 0.8px at 111px 69px, rgba(56, 189, 248, 0.22), rgba(56, 189, 248, 0) 100%),
+    radial-gradient(
+      1.1px 1.1px at 63px 161px,
+      rgba(168, 85, 247, 0.18),
+      rgba(168, 85, 247, 0) 100%
+    ),
+    radial-gradient(0.9px 0.9px at 177px 125px, rgba(56, 189, 248, 0.2), rgba(56, 189, 248, 0) 100%);
+  /* 瓦片尺寸与 at 坐标按同一比例缩放（0.75），保证光点仍落在瓦片内 */
+  background-size: 210px 210px, 255px 255px, 322px 322px, 285px 285px;
+  animation:
+    particle-drift 8s ease-in-out infinite,
+    particle-pulse 10s ease-in-out infinite;
+}
+
+.magic-particles::before,
+.magic-particles::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* 细尘层 A：以淡紫为主，颗粒 1–1.4px（半径 0.5–0.7px） */
+.magic-particles::before {
+  background-image:
+    radial-gradient(
+      0.5px 0.5px at 30px 45px,
+      rgba(168, 85, 247, 0.3),
+      rgba(168, 85, 247, 0) 100%
+    ),
+    radial-gradient(
+      0.65px 0.65px at 143px 23px,
+      rgba(168, 85, 247, 0.22),
+      rgba(168, 85, 247, 0) 100%
+    ),
+    radial-gradient(
+      0.55px 0.55px at 83px 113px,
+      rgba(56, 189, 248, 0.24),
+      rgba(56, 189, 248, 0) 100%
+    ),
+    radial-gradient(
+      0.7px 0.7px at 188px 158px,
+      rgba(168, 85, 247, 0.16),
+      rgba(168, 85, 247, 0) 100%
+    );
+  background-size: 165px 165px, 195px 195px, 232px 232px, 218px 218px;
+  animation:
+    particle-drift 9s ease-in-out infinite,
+    particle-pulse 7s ease-in-out infinite;
+}
+
+/* 细尘层 B：以淡蓝为主，颗粒 1–1.4px（半径 0.5–0.7px） */
+.magic-particles::after {
+  background-image:
+    radial-gradient(
+      0.55px 0.55px at 53px 90px,
+      rgba(56, 189, 248, 0.26),
+      rgba(56, 189, 248, 0) 100%
+    ),
+    radial-gradient(
+      0.5px 0.5px at 158px 53px,
+      rgba(168, 85, 247, 0.24),
+      rgba(168, 85, 247, 0) 100%
+    ),
+    radial-gradient(
+      0.7px 0.7px at 113px 180px,
+      rgba(56, 189, 248, 0.18),
+      rgba(56, 189, 248, 0) 100%
+    ),
+    radial-gradient(
+      0.65px 0.65px at 23px 143px,
+      rgba(56, 189, 248, 0.2),
+      rgba(56, 189, 248, 0) 100%
+    );
+  background-size: 180px 180px, 248px 248px, 202px 202px, 270px 270px;
+  animation:
+    particle-drift 10s ease-in-out infinite,
+    particle-pulse 8s ease-in-out infinite;
+}
+
+/* 极其缓慢的上下浮动 */
+@keyframes particle-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -22px, 0);
+  }
+}
+
+/* 极其缓慢的明暗呼吸。层不透明度 0.6–1，
+   乘上各光点自身的 alpha（0.16–0.3）后，实际落在 0.1–0.3 区间。 */
+@keyframes particle-pulse {
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 a {
